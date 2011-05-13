@@ -29,7 +29,7 @@ class Pixnet:
         pass
 
     def cmd(self, args):
-        def execute(parameters=None, method="GET"):
+        def execute(key=None, parameters=None, method="GET"):
             if not parameters:
                 parameters = {}
             
@@ -59,6 +59,9 @@ class Pixnet:
                     else:
                         p = True
 
+            if key:
+                url += '/%s' % key
+
             body = None
             param_encoded = urlencode(parameters)
             if len(param_encoded):
@@ -68,10 +71,13 @@ class Pixnet:
                 body = param_encoded
                 # headers['Content-Type'] = 'application/x-www-form-urlencoded'
             elif method == "GET":
+                if key:
+                    url = url[:-1]
+
                 if len(param_encoded):
                     url += '?' + param_encoded
 
-                print 'url is %s ' % url
+                #print 'url is %s ' % url
                 # print 'body is %s ' % body
             http = httplib2.Http()
             resp, content = http.request(url, method=method, body=body)
