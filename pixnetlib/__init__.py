@@ -9,16 +9,43 @@ Copyright (c) 2011 __MyCompanyName__. All rights reserved.
 
 import httplib2
 from urllib import urlencode
+from urllib import quote # = PHP's rawurlencode()
+import string, time, math, random
+import base64
+import hashlib
 import sys
 reload(sys)
 sys.setdefaultencoding("utf-8")
 
 import platform
-    
+
 if platform.python_version() >= '2.6.0':
     import json
 else:
     import simplejson as json
+
+def uniqid(prefix='', more_entropy=False):
+    m = time.time()
+    uniqid = '%8x%05x' %(math.floor(m),(m-math.floor(m))*1000000)
+    if more_entropy:
+        valid_chars = list(set(string.hexdigits.lower()))
+        entropy_string = ''
+        for i in range(0,10,1):
+            entropy_string += random.choice(valid_chars)
+        uniqid = uniqid + entropy_string
+    uniqid = prefix + uniqid
+    return uniqid
+
+def hash_hmac( digest_str, data, key ):
+    import hmac
+    digest_modules={'sha1': hashlib.sha1, 'md5': hashlib.md5}
+    if digest_modules.has_key( digest_str ):
+        digest_module=digest_modules[digest_str]
+    else:
+        digest_module=hashlib.md5
+    h = hmac.new(key, data, digest_module)
+    # raw output:
+    return h.digest()
 
 PIXNET_API_HTTP='http://emma.pixnet.cc'
          
@@ -95,3 +122,179 @@ class Pixnet:
         # raise Exception("attr can't end with '_'")
         args = attr.split('_')
         return self.cmd(args)
+
+class PixnetOAuth:
+    """ 
+    Reference:
+    http://code.google.com/p/phppixnetapi/source/browse/trunk/PixAPI.php
+    """
+
+    REQUEST_TOKEN_URL='http://emma.pixnet.cc/oauth/request_token'
+    ACCESS_TOKEN_URL='http://emma.pixnet.cc/oauth/access_token'
+    AUTHORIZATION_URL='http://emma.pixnet.cc/oauth/authorize'
+
+    def __init__(self, consumer_key, consumer_secret):
+        self.consumer_key = consumer_key
+        self.consumer_secret = consumer_secret
+        self._request_callback_url = None
+        self._request_expire = None
+        self._token = None
+        self._secret = None
+
+    def set_token( self, token, secret ):
+        self._token = token
+        self._secret = secret
+
+    def set_request_callback( self, callback_url ):
+        self._request_callback_url = callback_url
+
+    def _get_request_token(self):
+        if self._request_expire and time.time()<self._request_expire:
+            return
+
+        if self._request_callback_url==None:
+            message = self.http(self.REQUEST_TOKEN_URL)
+        else:
+            message = self.http(self.REQUEST_TOKEN_URL, {
+                    'oauth_params': {
+                        'oauth_callback': self._request_callback_url
+                    } } )
+        args = parse_str( message ) #TODO: parse_str??
+        self._token = args['oauth_token']
+        self._secret = args['oauth_token_secret']
+        self._request_expire = time.time()+args['oauth_expires_in']
+        self._request_auth_url = "%s?oauth_token=%s" % (
+                self.AUTHORIZATION_URL, args['oauth_token'] )
+
+
+    def get_auth_url( self, callback_url=None ):
+        if callback_url!=self._request_callback_url:
+            self._request_expire=None
+            self._request_callback_url = callback_url
+        self._get_request_token()
+        return self._request_auth_url
+
+    def get_access_token( self, verifier_token ):
+        message = self.http( self.ACCESS_TOKEN_URL, { # TODO
+                'oauth_params': {
+                    'oauth_verifier': verifier_token
+                } } )
+        args = parse_str( message ) # TODO
+        self._token = args['oauth_token']
+        self._secret = args['oauth_token_secret']
+        return (self.token, self.secret)
+
+    def get_request_token_pair(self):
+        self._get_request_token()
+        return (self.token, self.secret)
+
+    def http( self, url, options={} ):
+        # oauth authentication
+        oauth_args = {
+            'oauth_version': '1.0',
+            'oauth_nonce': hashlib.md5( uniqid() ).hexdigest(),
+            'oauth_timestamp': int( time.time() ),
+            'oauth_consumer_key': self.consumer_key,
+            'oauth_signature_method': 'HMAC-SHA1'
+        }
+        if self._token:
+            oauth_args['oauth_token']=self._token
+       
+        if options.has_key( 'oauth_param' ):
+            oauth_args.update( options['oauth_param'] )
+
+        parts = []
+        if options.has_key( 'method' ):
+            parts.append( options['method'].upper() )
+        elif options.has_key( 'post_params' ) or options.has_key( 'files' ):
+            parts.append( 'POST' )
+        else:
+            parts.append( 'GET' )
+
+        if options.has_key( 'get_params' ) and options['get_params']:
+            if url.rfind('?')!=-1:
+                url = url + '&'
+            else:
+                url = url + '?'
+            url = url + urlencode( options['get_params'] )
+        parts.append( quote( url, '' ) )
+
+        if options.has_key( 'get_params' ):
+            for key, value in options['get_params'].iteritems():
+                if not value:
+                    del options['get_params'][key]
+
+        if options.has_key( 'post_params' ):
+            for key, value in options['post_params'].iteritems():
+                if not value:
+                    del options['post_params'][key]
+
+        args = oauth_args.copy()
+        if options.has_key( 'post_params' ):
+            args.update( options['post_params'] )
+
+        if options.has_key( 'get_params' ):
+            args.update( options['get_params'] )
+
+        args_part = []
+        for key in sorted( args.keys() ):
+            args_part.append( "%s=%s" % (
+                        quote(key,''), quote(str(args[key]),'') ) )
+        parts.append( quote( '&'.join( args_part ), '' ) )
+        base_string='&'.join( parts )
+        print "base_string=%s" % base_string
+       
+        key_parts = [ quote( self.consumer_secret, '' ) ]
+        if self._secret:
+            key_parts.append( quote(self._secret, '') )
+        else:
+            key_parts.append( '' )
+
+        key = '&'.join( key_parts )
+        print "key=%s" % key
+        oauth_args['oauth_signature']=base64.encodestring( 
+            hash_hmac( 'sha1', base_string, key ) )
+
+        oauth_header = 'OAuth '
+        first = True
+        for k in oauth_args.keys():
+            if not k.startswith( 'oauth' ):
+                continue
+            if not first:
+                oauth_header=oauth_header+','
+            v = str(oauth_args[k])
+            oauth_header=oauth_header+quote(k, '')+'="'+quote(v, '')+'"'
+            first=False
+
+        if options.has_key( 'method' ):
+            method = options['method'].upper()
+        elif options.has_key( 'post_params' ) or options.has_key('files'):
+            method = "POST"
+        else:
+            method = "GET"
+
+        header = {'Authorization': oauth_header }
+        body=""
+        if options.has_key('post_params'):
+            body = urlencode( options['post_params'] )
+        if options.has_key('files'):
+            raise Exception("Not implemented.")
+        print "====="
+        print "url=%s" % url
+        print "method=%s" % method
+        print "body=%s" % body
+        print "headers=", header
+        print "====="
+        http = httplib2.Http()
+        resp, content = http.request(
+                url, 
+                method=method, 
+                body=body,
+                headers=header )
+
+        if resp['status'] != '200':
+            raise Exception("Invalid response %s. body=%s" % (
+                        resp['status'],
+                        content ) )
+        return content
+
