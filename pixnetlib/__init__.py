@@ -36,16 +36,22 @@ def uniqid(prefix='', more_entropy=False):
     uniqid = prefix + uniqid
     return uniqid
 
-def hash_hmac( digest_str, data, key ):
+def hash_hmac( digest_str, data, key, raw_output=False ):
     import hmac
     digest_modules={'sha1': hashlib.sha1, 'md5': hashlib.md5}
-    if digest_modules.has_key( digest_str ):
-        digest_module=digest_modules[digest_str]
+    if not digest_modules.has_key( digest_str ):
+        digest_str='md5'
+    digest_module=digest_modules[digest_str]
+    h=hmac.new(key, data, digest_module)
+    if raw_output:
+        r=h.digest()
     else:
-        digest_module=hashlib.md5
-    h = hmac.new(key, data, digest_module)
-    # raw output:
-    return h.digest()
+        r=h.hexdigest()
+    return r
+
+def parse_str(s):
+    import urlparse
+    return urlparse.parse_qs(s)
 
 PIXNET_API_HTTP='http://emma.pixnet.cc'
          
@@ -159,13 +165,12 @@ class PixnetOAuth:
                     'oauth_params': {
                         'oauth_callback': self._request_callback_url
                     } } )
-        args = parse_str( message ) #TODO: parse_str??
-        self._token = args['oauth_token']
-        self._secret = args['oauth_token_secret']
-        self._request_expire = time.time()+args['oauth_expires_in']
+        args = parse_str( message )
+        self._token = args['oauth_token'][0]
+        self._secret = args['oauth_token_secret'][0]
+        self._request_expire = time.time()+float(args['oauth_expires_in'][0])
         self._request_auth_url = "%s?oauth_token=%s" % (
-                self.AUTHORIZATION_URL, args['oauth_token'] )
-
+                self.AUTHORIZATION_URL, args['oauth_token'][0] )
 
     def get_auth_url( self, callback_url=None ):
         if callback_url!=self._request_callback_url:
@@ -197,6 +202,8 @@ class PixnetOAuth:
             'oauth_consumer_key': self.consumer_key,
             'oauth_signature_method': 'HMAC-SHA1'
         }
+#        oauth_args['oauth_nonce']="d4778299f05938e79c7b8b4896049ee4"
+#        oauth_args['oauth_timestamp']=1306464057
         if self._token:
             oauth_args['oauth_token']=self._token
        
@@ -242,7 +249,6 @@ class PixnetOAuth:
                         quote(key,''), quote(str(args[key]),'') ) )
         parts.append( quote( '&'.join( args_part ), '' ) )
         base_string='&'.join( parts )
-        print "base_string=%s" % base_string
        
         key_parts = [ quote( self.consumer_secret, '' ) ]
         if self._secret:
@@ -251,9 +257,8 @@ class PixnetOAuth:
             key_parts.append( '' )
 
         key = '&'.join( key_parts )
-        print "key=%s" % key
         oauth_args['oauth_signature']=base64.encodestring( 
-            hash_hmac( 'sha1', base_string, key ) )
+            hash_hmac( 'sha1', base_string, key, True) )[:-1]
 
         oauth_header = 'OAuth '
         first = True
@@ -279,12 +284,6 @@ class PixnetOAuth:
             body = urlencode( options['post_params'] )
         if options.has_key('files'):
             raise Exception("Not implemented.")
-        print "====="
-        print "url=%s" % url
-        print "method=%s" % method
-        print "body=%s" % body
-        print "headers=", header
-        print "====="
         http = httplib2.Http()
         resp, content = http.request(
                 url, 
