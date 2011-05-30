@@ -4,7 +4,10 @@ consumer_key = "{consumer_key}"
 consumer_secret = "{consumer_secret}"
 api = PixnetOAuth( consumer_key, consumer_secret )
 print( "Please visit %s to authorization." % api.get_auth_url() )
+print( "Please input verifier_token (oauth_verifier_token):" )
 verifier_token = raw_input()
-api.get_access_token( verifier_token )
+#print( "Please input token (oauth_token):" )
+#token=raw_input()
+print api.get_access_token( verifier_token )
 print "ok"
 
