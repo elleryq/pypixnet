@@ -1,7 +1,7 @@
 from pixnetlib import PixnetOAuth
 
-consumer_key = "194f65eab45b79a186f47655376934f5"
-consumer_secret = "4b4f6368334e2add978c9231f176479d"
+consumer_key = "{consumer_key}"
+consumer_secret = "{consumer_secret}"
 api = PixnetOAuth( consumer_key, consumer_secret )
 print( "Please visit %s to authorization." % api.get_auth_url() )
 verifier_token = raw_input()
