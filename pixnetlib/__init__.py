@@ -142,7 +142,7 @@ class PixnetOAuth:
     ACCESS_TOKEN_URL='http://emma.pixnet.cc/oauth/access_token'
     AUTHORIZATION_URL='http://emma.pixnet.cc/oauth/authorize'
 
-    def __init__(self, consumer_key, consumer_secret):
+    def __init__(self, consumer_key=None, consumer_secret=None):
         self.consumer_key = consumer_key
         self.consumer_secret = consumer_secret
         self._request_callback_url = None
@@ -202,9 +202,10 @@ class PixnetOAuth:
             'oauth_version': '1.0',
             'oauth_nonce': hashlib.md5( uniqid() ).hexdigest(),
             'oauth_timestamp': int( time.time() ),
-            'oauth_consumer_key': self.consumer_key,
             'oauth_signature_method': 'HMAC-SHA1'
         }
+        if self.consumer_key:
+            oauth_args[ 'oauth_consumer_key' ] = self.consumer_key
         if self._token:
             oauth_args['oauth_token']=self._token
        
@@ -250,8 +251,10 @@ class PixnetOAuth:
                         quote(key,''), quote(str(args[key]),'') ) )
         parts.append( quote( '&'.join( args_part ), '' ) )
         base_string='&'.join( parts )
-       
-        key_parts = [ quote( self.consumer_secret, '' ) ]
+     
+        key_parts=[]
+        if self.consumer_secret:
+            key_parts.append( quote( self.consumer_secret, '' ) )
         if self._secret:
             key_parts.append( quote(self._secret, '') )
         else:
@@ -298,3 +301,63 @@ class PixnetOAuth:
                         content ) )
         return content
 
+    def cmd(self, args):
+        def execute(key=None, parameters=None, method="GET"):
+            if not parameters:
+                parameters = {}
+            
+            defaults = {}
+            defaults.update(parameters)
+            parameters = defaults
+
+            url = PIXNET_API_HTTP
+
+            p = False
+            for arg in args:
+                if arg.upper() in HTTP_METHOD:
+                    method = arg.upper()
+                    continue
+
+                if arg != '' and not p:
+                    url += '/%s' % arg
+                else:
+                    if p:
+                        #read parameters
+                        if arg not in parameters:
+                            raise Exception("Parameter '%s' is required." % arg)
+                        url += '/%s' % parameters[arg]
+                        del parameters[arg]
+                        p = False
+                    else:
+                        p = True
+
+            if key:
+                url += '/%s' % key
+
+#body = None
+#param_encoded = urlencode(parameters)
+#if len(param_encoded):
+#    url += '/'
+
+#if method == "POST":
+#    body = param_encoded
+#elif method == "GET":
+#    if key:
+#        url = url[:-1]
+
+#    if len(param_encoded):
+#        url += '?' + param_encoded
+            content=self.http( url, {
+                    '%s_params'%method.lower(): parameters
+                    } )
+            return json.loads(content)
+
+        return execute
+
+    def __getattr__(self, attr):
+        # if attr.startswith('_'):
+        # raise Exception("'Trunkly' object has no attribute '_abc_'")
+        # if attr.endswith('_'):
+        # raise Exception("attr can't end with '_'")
+        args = attr.split('_')
+        return self.cmd(args)
